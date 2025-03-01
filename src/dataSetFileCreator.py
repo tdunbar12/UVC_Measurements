@@ -1,7 +1,10 @@
-import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import os
+
 
 wavelengths = [
-    190.0, 190.5, 191.0, 191.5, 192.0, 192.5, 193.0, 193.5, 194.0, 194.5,
+     190.0, 190.5, 191.0, 191.5, 192.0, 192.5, 193.0, 193.5, 194.0, 194.5,
     195.0, 195.5, 196.0, 196.5, 197.0, 197.5, 198.0, 198.5, 199.0, 199.5,
     200.0, 200.5, 201.0, 201.5, 202.0, 202.5, 203.0, 203.5, 204.0, 204.5,
     205.0, 205.5, 206.0, 206.5, 207.0, 207.5, 208.0, 208.5, 209.0, 209.5,
@@ -42,15 +45,22 @@ intensities = [
     0.0
 ]
 
-plt.figure(figsize=(8, 5))
-plt.semilogy(wavelengths, intensities, 'b.-', label='KrCl Data')
-plt.xlabel('Wavelength (nm)')
-plt.ylabel('Normalized Intensity (log scale)')
-plt.title('Krypton Chloride Emission Spectrum (Extracted)')
-plt.legend()
-plt.grid(True, which='both', linestyle='--', alpha=0.5)
+# Create the data input directory if it doesn't exist
+data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'input')
+os.makedirs(data_dir, exist_ok=True)
 
-# Optionally adjust the y-axis limits if you want to see more detail in the low-intensity region.
-# plt.ylim(bottom=1e-1)
 
-plt.show()
+# Create a pandas DataFrame with descriptive column names
+df = pd.DataFrame({
+    'wavelength_nm': wavelengths,  # Added unit suffix for clarity
+    'intensity_normalized': intensities  # Added normalization info
+})
+
+# Save to CSV with specific formatting for better Rainbow CSV visualization
+output_file = os.path.join(data_dir, 'krcl_spectrum.csv')
+df.to_csv(output_file, 
+          index=False,
+          float_format='%.3f',  # Format numbers to 3 decimal places
+          encoding='utf-8')     # Explicit encoding for consistency
+
+print(f"Data saved to {output_file}")
