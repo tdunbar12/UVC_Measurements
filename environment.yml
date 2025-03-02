@@ -1,0 +1,11 @@
+name: uvc_measure
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - opencv
+  - numpy
+  - pandas
+  - matplotlib
+  - tk

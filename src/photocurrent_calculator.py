@@ -7,7 +7,15 @@ import tkinter as tk
 import pandas as pd
 
 def load_spectral_data():
-    """Load spectral data from a CSV or text file."""
+    """
+    Load spectral data from a CSV or text file.
+    CSV files should have headers and use standard comma separation for Rainbow CSV compatibility.
+    Expected format:
+    wavelength_nm,intensity_normalized
+    190.0,0.0
+    190.5,100.0
+    ...
+    """
     root = tk.Tk()
     root.withdraw()  # Hide the main window
     
@@ -24,17 +32,31 @@ def load_spectral_data():
         return None, None
     
     try:
-        # Try reading as CSV first
+        # Try reading as CSV first with explicit column names for Rainbow CSV
         data = pd.read_csv(file_path)
-        # Assume first column is wavelength, second is intensity
-        wavelengths = data.iloc[:, 0].values
-        intensities = data.iloc[:, 1].values
+        # Look for standardized column names
+        wavelength_col = next(col for col in data.columns if 'wavelength' in col.lower())
+        intensity_col = next(col for col in data.columns if 'intensity' in col.lower())
+        wavelengths = data[wavelength_col].values
+        intensities = data[intensity_col].values
     except:
         try:
-            # Try reading as space/tab-delimited text
+            # Fallback: Try reading as space/tab-delimited text
             data = np.loadtxt(file_path)
             wavelengths = data[:, 0]
             intensities = data[:, 1]
+            
+            # Convert to CSV format for future use with Rainbow CSV
+            output_df = pd.DataFrame({
+                'wavelength_nm': wavelengths,
+                'intensity_normalized': intensities
+            })
+            csv_path = file_path.rsplit('.', 1)[0] + '.csv'
+            output_df.to_csv(csv_path, 
+                           index=False,
+                           float_format='%.3f',
+                           encoding='utf-8')
+            print(f"Converted and saved to CSV: {csv_path}")
         except:
             print(f"Error: Could not read file {file_path}")
             return None, None

@@ -1,3 +1,18 @@
+"""
+Plot Image to CSV Converter
+--------------------------
+Extracts data points from graph images and saves to CSV format.
+Currently supports:
+- Linear and log-linear plots
+- Normalized output data
+- Dual save locations (Linux project dir and Windows access)
+
+Known issues:
+- Manual calibration needed for axes
+- Edge detection needs improvement
+- Scale accuracy needs verification
+"""
+
 import cv2
 import numpy as np
 import pandas as pd
