@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "/home/tom/anaconda3/envs/uvc_measure/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "terminal.integrated.inheritEnv": true,
+    "python.terminal.activateEnvInCurrentTerminal": true
+}

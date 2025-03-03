@@ -5,6 +5,11 @@ import numpy as np
 from tkinter import filedialog
 import tkinter as tk
 import pandas as pd
+import os
+
+def get_input_directory():
+    """Get the input directory for spectral data files"""
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'input')
 
 def load_spectral_data():
     """
@@ -19,7 +24,10 @@ def load_spectral_data():
     root = tk.Tk()
     root.withdraw()  # Hide the main window
     
+    # Set initial directory to data/input
+    initial_dir = get_input_directory()
     file_path = filedialog.askopenfilename(
+        initialdir=initial_dir,
         title="Select spectral data file",
         filetypes=[
             ("CSV files", "*.csv"),
