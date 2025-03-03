@@ -1,8 +1,39 @@
-# UVC Measurements
+# UVC Measurements Tools
 
-A Python tool for analyzing UV-C spectral data and calculating photocurrent.
+A collection of tools for analyzing UVC measurements and processing spectral data.
 
-## Project Description
+## Tools Included
+
+### 1. Interactive Plot Digitizer
+A graphical tool for extracting data points from spectral plots. Features include:
+
+- Support for both linear and log-linear plots
+- Multi-step calibration process:
+  - X-axis (wavelength) calibration
+  - Y-axis (intensity) calibration
+  - Data point collection
+- Multiple interpolation methods:
+  - Spline interpolation for smooth curves
+  - Local window interpolation for sharp transitions
+  - Linear interpolation for simple point-to-point
+- Real-time visualization of selected points
+- Verification plotting with original and interpolated data
+- Undo functionality for point selection
+- Export to 1nm resolution data
+
+#### Usage:
+```bash
+python src/Interactive_Plot_Digitizer.py
+```
+
+Follow the on-screen instructions to:
+1. Load and size the plot image
+2. Select plot type (linear or log-linear)
+3. Calibrate axes by selecting points and entering values
+4. Collect data points along the curve
+5. Choose interpolation method and verify results
+
+### 2. Photocurrent Calculator
 This tool processes spectral data from UV-C sources, filters, and detectors to calculate photocurrent. It supports:
 - Loading spectral data from CSV files
 - Interactive plotting of spectral data
@@ -17,10 +48,13 @@ cd UVC_Measurements
 ```
 
 ## Dependencies
-- Python 3.8+
+- Python 3.11+
 - pandas
 - numpy
 - matplotlib
+- opencv-python
+- scipy
+- tkinter
 
 ## Project Structure
 ```
@@ -28,11 +62,15 @@ UVC_Measurements/
 ├── src/
 │   ├── __init__.py
 │   ├── photocurrent_calculator.py
-│   └── dataset_file_creator.py
+│   ├── dataset_file_creator.py
+│   └── Interactive_Plot_Digitizer.py
 ├── data/
 │   ├── input/
+│   │   ├── D2-Lamp.csv
+│   │   └── LPMV-Lamp.csv
 │   └── output/
-└── tests/
+├── tests/
+└── .gitignore
 ```
 
 ## Development Setup
@@ -64,11 +102,31 @@ python src/photocurrent_calculator.py
 ## Data Format
 Input CSV files should follow this format:
 ```csv
-wavelength_nm,intensity_normalized
+wavelength_nm,intensity
 190.000,0.000
-190.500,100.000
+191.000,0.100
 ...
 ```
+
+## Interactive Plot Digitizer Features
+- Multiple interpolation methods for different curve types
+- Support for log-linear plots common in spectral data
+- Real-time visualization of selected points
+- Verification plotting showing both original and processed data
+- Undo functionality for point selection
+- Export to standardized 1nm resolution CSV format
+
+### Known Issues
+- Overflow handling in log scale plots needs improvement
+- Edge cases in interpolation methods
+- Scale calibration requires careful point selection
+
+### Next Steps
+- [ ] Improve log scale handling
+- [ ] Add data smoothing options
+- [ ] Implement better error handling
+- [ ] Add validation metrics
+- [ ] Support for multiple plot types
 
 ## License
 MIT License
