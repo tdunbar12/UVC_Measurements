@@ -2,13 +2,16 @@ import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from tkinter import Tk, filedialog, messagebox
+from tkinter import Tk, filedialog, messagebox, StringVar as tk_StringVar
+import tkinter as tk
+from tkinter import ttk
 import os
 import scipy.interpolate as interp
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import traceback
-import numpy as np
+from statsmodels.nonparametric.smoothers_lowess import lowess
+
 
 class PlotDigitizer:
     def __init__(self):
@@ -417,64 +420,80 @@ class PlotDigitizer:
             x_pixels, x_values = zip(*sorted_x_cal)
             y_pixels, y_values = zip(*sorted_y_cal)
             
-            # Filter points within calibration ranges
-            margin = 1  # Allow slight extrapolation
-            valid_points = []
-            for x, y in zip(x_data, y_data):
-                if (min(x_pixels) - margin <= x <= max(x_pixels) + margin and 
-                    min(y_pixels) - margin <= y <= max(y_pixels) + margin):
-                    valid_points.append((x, y))
-                else:
-                    print(f"Point ({x}, {y}) outside calibration range - skipped")
-            
-            if not valid_points:
-                print("No valid points after range filtering")
-                return False
-            
-            x_data, y_data = zip(*valid_points)
-            
-            # Convert x coordinates to wavelengths
+            # Convert coordinates using calibration
             x_interpolator = interp.interp1d(x_pixels, x_values, kind='linear')
             wavelengths = x_interpolator(x_data)
-            
-            # Convert y coordinates to intensities
-            # For log plots, y_values are already actual intensities
             y_interpolator = interp.interp1d(y_pixels, y_values, kind='linear')
             intensities = y_interpolator(y_data)
             
-            # Create wavelength range for output
-            start_nm = int(min(wavelengths))
-            end_nm = int(max(wavelengths)) + 1
+            # Handle multiple y-values at same x by averaging
+            wavelength_dict = {}
+            for wave, intensity in zip(wavelengths, intensities):
+                wave = round(wave, 3)  # Round to reduce floating point issues
+                if wave in wavelength_dict:
+                    wavelength_dict[wave].append(intensity)
+                else:
+                    wavelength_dict[wave] = [intensity]
+            
+            # Create unique x,y pairs with averaged y values
+            unique_wavelengths = []
+            unique_intensities = []
+            for wave in sorted(wavelength_dict.keys()):
+                unique_wavelengths.append(wave)
+                unique_intensities.append(np.mean(wavelength_dict[wave]))
+                if len(wavelength_dict[wave]) > 1:
+                    print(f"Averaged {len(wavelength_dict[wave])} values at {wave}nm")
+            
+            # Create output wavelength range
+            start_nm = int(min(unique_wavelengths))
+            end_nm = int(max(unique_wavelengths)) + 1
             wavelength_range = np.arange(start_nm, end_nm, 1.0)
             
             # Perform interpolation based on chosen method
-            if method == 'spline':
-                interp_func = interp.CubicSpline(wavelengths, intensities)
+            if method == 'loess':
+                # LOESS smoothing implementation
+                bandwidth = 0.3
+                smoothed = lowess(unique_intensities, 
+                                unique_wavelengths,
+                                frac=bandwidth,
+                                it=1,
+                                return_sorted=True)
+                
+                loess_interp = interp.interp1d(smoothed[:, 0],
+                                             smoothed[:, 1],
+                                             bounds_error=False,
+                                             fill_value='extrapolate')
+                interpolated = loess_interp(wavelength_range)
+                
+            elif method == 'spline':
+                interp_func = interp.CubicSpline(unique_wavelengths, unique_intensities)
+                interpolated = interp_func(wavelength_range)
+                
             elif method == 'linear':
-                interp_func = interp.interp1d(wavelengths, intensities, 
+                interp_func = interp.interp1d(unique_wavelengths, unique_intensities, 
                                             kind='linear',
-                                            bounds_error=False)
+                                            bounds_error=False,
+                                            fill_value='extrapolate')
+                interpolated = interp_func(wavelength_range)
+                
             elif method == 'local':
                 # Local window approach
                 window_size = 5
                 interpolated = []
                 for wave in wavelength_range:
-                    mask = np.abs(wavelengths - wave) <= window_size
+                    mask = np.abs(np.array(unique_wavelengths) - wave) <= window_size
                     if np.sum(mask) >= 2:
-                        local_waves = wavelengths[mask]
-                        local_ints = intensities[mask]
+                        local_waves = np.array(unique_wavelengths)[mask]
+                        local_ints = np.array(unique_intensities)[mask]
                         local_interp = interp.interp1d(local_waves, local_ints,
-                                                     bounds_error=False)
+                                                     bounds_error=False,
+                                                     fill_value='extrapolate')
                         interpolated.append(float(local_interp(wave)))
                     else:
-                        idx = np.argmin(np.abs(wavelengths - wave))
-                        interpolated.append(float(intensities[idx]))
-                
-                self.interpolated_points = list(zip(wavelength_range, interpolated))
-                return True
-            
-            # For spline and linear methods
-            interpolated = interp_func(wavelength_range)
+                        idx = np.argmin(np.abs(np.array(unique_wavelengths) - wave))
+                        interpolated.append(float(unique_intensities[idx]))
+        
+            # Store interpolated points for all methods
             self.interpolated_points = list(zip(wavelength_range, interpolated))
             print(f"Successfully interpolated {len(self.interpolated_points)} points using {method} method")
             return True
@@ -484,164 +503,268 @@ class PlotDigitizer:
             traceback.print_exc()
             return False
 
-    def choose_interpolation_method(self):
-        """Let user choose interpolation method"""
-        root = Tk()
-        root.withdraw()
+    def choose_interpolation_method(self, parent=None):
+        """Let user choose interpolation method using a dropdown"""
         methods = {
-            'Spline': 'spline',
-            'Local Window': 'local',
-            'Linear': 'linear'
+            'Spline - Best for smooth curves': 'spline',
+            'LOESS - Best for noisy data': 'loess',
+            'Local Window - Better for sharp transitions': 'local',
+            'Linear - Simple point-to-point': 'linear'
         }
         
-        msg = "Choose interpolation method:\n\n" + \
-              "Spline - Best for smooth curves\n" + \
-              "Local Window - Better for sharp transitions\n" + \
-              "Linear - Simple point-to-point"
-              
-        choice = messagebox.askquestion("Interpolation Method", 
-            msg + "\n\nTry spline method first?")
+        # Create dialog window
+        dialog = tk.Toplevel(parent) if parent else Tk()
+        dialog.title("Choose Interpolation Method")
+        dialog.geometry("400x250")
+        dialog.grab_set()  # Make dialog modal
         
-        if choice == 'yes':
-            return 'spline'
-        else:
-            choice = messagebox.askquestion("Interpolation Method",
-                "Try local window method?\n(No will use linear)")
-            return 'local' if choice == 'yes' else 'linear'
+        # Add description
+        desc = ttk.Label(dialog, text="Select interpolation method:", 
+                         wraplength=350, justify="left")
+        desc.pack(pady=10)
+        
+        # Create combobox
+        method_var = tk.StringVar(value='Spline - Best for smooth curves')  # Set initial value
+        combo = ttk.Combobox(dialog, 
+                            textvariable=method_var,
+                            values=list(methods.keys()),
+                            state="readonly",
+                            width=40)
+        combo.pack(pady=10)
+        
+        # Add method descriptions
+        descriptions = {
+            'spline': 'Cubic spline interpolation for smooth, continuous curves',
+            'loess': 'Local regression smoothing, good for noisy data',
+            'local': 'Moving window average for curves with sharp transitions',
+            'linear': 'Simple linear interpolation between points'
+        }
+        
+        desc_text = tk.Text(dialog, height=6, width=40, wrap=tk.WORD)
+        desc_text.pack(pady=10)
+        
+        def update_description(*args):
+            selected = method_var.get()
+            if selected:  # Only update if a value is selected
+                method_key = methods[selected]
+                desc_text.delete('1.0', tk.END)
+                desc_text.insert('1.0', descriptions[method_key])
+        
+        method_var.trace('w', update_description)
+        update_description()  # Show initial description
+        
+        # Add OK button with proper cleanup
+        selected_method = [None]
+        def on_ok():
+            selected_method[0] = methods[method_var.get()]
+            dialog.quit()  # Use quit instead of destroy
+            dialog.destroy()
+        
+        ttk.Button(dialog, text="OK", command=on_ok).pack(pady=10)
+        
+        # Add protocol for window close button
+        dialog.protocol("WM_DELETE_WINDOW", on_ok)
+        
+        # Make dialog modal and wait for result
+        dialog.transient(parent)
+        dialog.grab_set()
+        dialog.wait_window()
+        
+        return selected_method[0] or 'spline'
 
     def plot_verification(self):
-        """Show original points and interpolated curve with better scaling"""
+        """Show original points and interpolated curve"""
         if not self.interpolated_points:
             print("Run interpolation first")
             return False
             
         try:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+            # Close any existing plots and create new figure
+            plt.close('all')  # Close all existing plots first
+            
+            # Create figure without interactive mode
+            fig = plt.figure(figsize=(12, 6))
+            gs = fig.add_gridspec(1, 2)
+            ax1 = fig.add_subplot(gs[0, 0])
+            ax2 = fig.add_subplot(gs[0, 1])
             
             # Original image with points
-            ax1.imshow(cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB))
+            rgb_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
+            ax1.imshow(rgb_image)
             x_data, y_data = zip(*self.data_points)
             ax1.plot(x_data, y_data, 'r.', label='Selected Points')
             ax1.set_title('Original Image with Points')
             
-            # Convert original points to wavelengths and intensities
-            x_to_wave = interp.interp1d([x for x, _ in self.x_calibration_points],
-                                       [v for _, v in self.x_calibration_points],
-                                       bounds_error=False,
-                                       fill_value='extrapolate')
-            
-            y_to_int = interp.interp1d([y for y, _ in self.y_calibration_points],
-                                      [v for _, v in self.y_calibration_points],
-                                      bounds_error=False,
-                                      fill_value='extrapolate')
-            
-            # Convert points and filter out invalid values
-            x_orig = x_to_wave(x_data)
-            y_orig = y_to_int(y_data)  # Values are already in actual units
-            
-            # Filter out any invalid points
-            valid_mask = np.isfinite(x_orig) & np.isfinite(y_orig)
-            if not np.any(valid_mask):
-                print("No valid points to plot")
+            try:
+                # Convert points
+                x_to_wave = interp.interp1d([x for x, _ in self.x_calibration_points],
+                                          [v for _, v in self.x_calibration_points],
+                                          bounds_error=False,
+                                          fill_value='extrapolate')
+                
+                y_to_int = interp.interp1d([y for y, _ in self.y_calibration_points],
+                                          [v for _, v in self.y_calibration_points],
+                                          bounds_error=False,
+                                          fill_value='extrapolate')
+                
+                x_orig = x_to_wave(x_data)
+                y_orig = y_to_int(y_data)
+                
+                # Get interpolated data
+                wavelengths, intensities = zip(*self.interpolated_points)
+                wavelengths = np.array(wavelengths)
+                intensities = np.array(intensities)
+                
+                # Plot data
+                ax2.plot(wavelengths, intensities, 'b-', label='Interpolated (1nm)')
+                ax2.plot(x_orig, y_orig, 'r.', markersize=8, label='Original Points')
+                
+                # Set axis labels
+                ax2.set_xlabel('Wavelength (nm)')
+                ax2.set_ylabel('Intensity')
+                
+                # Handle log scale
+                if self.is_log_plot:
+                    ax2.set_yscale('log')
+                    ax2.grid(True, which='both')
+                    ax2.grid(True, which='minor', alpha=0.2)
+                else:
+                    ax2.grid(True)
+                
+                ax2.legend()
+                ax2.set_title('Interpolated Data')
+                
+                # Adjust layout
+                plt.tight_layout()
+                
+                # Add close button with proper callback
+                def on_close(event):
+                    plt.close('all')
+                    plt.ioff()  # Turn off interactive mode
+                
+                button_ax = plt.axes([0.45, 0.02, 0.1, 0.04])
+                close_button = plt.Button(button_ax, 'Close')
+                close_button.on_clicked(on_close)
+                
+                # Show plot with block=True and proper cleanup
+                plt.show()
+                return True
+                
+            except Exception as e:
+                print(f"Error in data conversion: {str(e)}")
+                traceback.print_exc()
+                plt.close('all')
                 return False
                 
-            x_orig = x_orig[valid_mask]
-            y_orig = y_orig[valid_mask]
+        except Exception as e:
+            print(f"Plot verification error: {str(e)}")
+            traceback.print_exc()
+            plt.close('all')
+            return False
+
+    def save_interpolated_data(self):
+        """Save interpolated data to CSV file"""
+        try:
+            # Create file dialog
+            root = Tk()
+            root.withdraw()
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Save Interpolated Data"
+            )
             
-            # Plot interpolated data
-            wavelengths, intensities = zip(*self.interpolated_points)
-            # Filter interpolated points
-            valid_interp = np.isfinite(intensities)
-            wavelengths = np.array(wavelengths)[valid_interp]
-            intensities = np.array(intensities)[valid_interp]
-            
-            ax2.plot(wavelengths, intensities, 'b-', label='Interpolated (1nm)')
-            ax2.plot(x_orig, y_orig, 'r.', markersize=8, label='Original Points')
-            
-            ax2.set_xlabel('Wavelength (nm)')
-            ax2.set_ylabel('Intensity')
-            
-            if self.is_log_plot:
-                # Set log scale with safe limits
-                y_min = max(1e-10, min(y_orig.min(), intensities.min()))
-                y_max = min(1e10, max(y_orig.max(), intensities.max()))
-                ax2.set_yscale('log')
-                ax2.set_ylim(y_min, y_max)
-                # Add grid with minor lines
-                ax2.grid(True, which='both')
-                ax2.grid(True, which='minor', alpha=0.2)
-            else:
-                y_min = min(y_orig.min(), intensities.min())
-                y_max = max(y_orig.max(), intensities.max())
-                ax2.set_ylim(y_min * 0.9, y_max * 1.1)
-                ax2.grid(True)
+            if not file_path:
+                print("Save cancelled")
+                return False
                 
-            ax2.legend()
-            ax2.set_title('Interpolated Data')
+            # Create DataFrame and save
+            wavelengths, intensities = zip(*self.interpolated_points)
+            df = pd.DataFrame({
+                'wavelength_nm': wavelengths,
+                'intensity': intensities
+            })
             
-            plt.tight_layout()
-            plt.show()
+            df.to_csv(file_path, index=False)
+            print(f"Data saved to: {file_path}")
             return True
             
         except Exception as e:
-            print(f"Plot verification error: {str(e)}")
+            print(f"Error saving data: {str(e)}")
             traceback.print_exc()
             return False
 
 # Update main to include X calibration test
 if __name__ == "__main__":
-    digitizer = PlotDigitizer()
-    print("Testing image display...")
-    if digitizer.test_image_display():
-        print("Image display test passed")
-        print("\nTesting plot type selection...")
-        if digitizer.test_plot_type_selection():
-            print("Plot type selection test passed")
-            print("\nTesting X-axis calibration...")
-            if digitizer.test_x_calibration():
-                print("X-axis calibration test passed")
-                print("\nTesting Y-axis calibration...")
-                if digitizer.test_y_calibration():
-                    print("Y-axis calibration test passed")
-                    print("\nTesting data point collection...")
-                    if digitizer.test_data_collection():
-                        print("\nData collection test passed")
-                        
-                        while True:
-                            # Let user choose method
-                            method = digitizer.choose_interpolation_method()
-                            print(f"\nUsing {method} interpolation method...")
-                            
-                            if digitizer.interpolate_data(method=method):
-                                print(f"{method.capitalize()} interpolation successful")
-                                print("Showing verification plot...")
-                                
-                                try:
-                                    digitizer.plot_verification()
-                                    
-                                    # Ask if result is satisfactory
-                                    root = Tk()
-                                    root.withdraw()
-                                    if messagebox.askyesno("Verification", 
-                                        "Are you satisfied with the interpolation result?"):
-                                        break
-                                    else:
-                                        print("\nTry a different interpolation method...")
-                                except Exception as e:
-                                    print(f"Plot error: {str(e)}")
-                                    traceback.print_exc()
-                            else:
-                                print(f"{method.capitalize()} interpolation failed")
-                                if not messagebox.askyesno("Retry?", 
-                                    "Would you like to try a different method?"):
-                                    break
+    root = None
+    try:
+        # Initialize Tk root window
+        root = Tk()
+        root.withdraw()
+        
+        digitizer = PlotDigitizer()
+        
+        # Clean start
+        plt.close('all')
+        cv2.destroyAllWindows()
+        
+        if (digitizer.test_image_display() and 
+            digitizer.test_plot_type_selection() and
+            digitizer.test_x_calibration() and
+            digitizer.test_y_calibration() and
+            digitizer.test_data_collection()):
+            
+            print("\nData collection test passed")
+            plt.ioff()  # Turn off interactive mode
+            
+            while True:
+                # Clean up before method selection
+                cv2.destroyAllWindows()
+                plt.close('all')
+                
+                # Show root temporarily for dialog
+                root.deiconify()
+                method = digitizer.choose_interpolation_method(root)
+                root.withdraw()
+                
+                if not method:
+                    print("No interpolation method selected")
+                    break
+                    
+                print(f"\nUsing {method} interpolation method...")
+                if digitizer.interpolate_data(method=method):
+                    print(f"{method.capitalize()} interpolation successful")
+                    print("Showing verification plot...")
+                    
+                    if digitizer.plot_verification():
+                        if messagebox.askyesno("Verification", 
+                            "Are you satisfied with the interpolation result?"):
+                            if messagebox.askyesno("Save Data",
+                                "Would you like to save the interpolated data?"):
+                                digitizer.save_interpolated_data()
+                            break
+                        else:
+                            print("\nTry a different interpolation method...")
                     else:
-                        print("\nData collection test failed")
+                        print("Plot verification failed")
+                        if not messagebox.askyesno("Retry?", 
+                            "Would you like to try a different method?"):
+                            break
                 else:
-                    print("Y-axis calibration test failed")
-            else:
-                print("X-axis calibration test failed")
-        else:
-            print("Plot type selection test failed")
-    else:
-        print("Image display test failed")
+                    print(f"{method.capitalize()} interpolation failed")
+                    if not messagebox.askyesno("Retry?", 
+                        "Would you like to try a different method?"):
+                        break
+                        
+    except Exception as e:
+        print(f"Program error: {str(e)}")
+        traceback.print_exc()
+    finally:
+        plt.close('all')
+        cv2.destroyAllWindows()
+        if root:
+            try:
+                root.quit()
+                root.destroy()
+            except:
+                pass
